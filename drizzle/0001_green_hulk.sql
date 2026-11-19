@@ -1,5 +1,13 @@
-CREATE TYPE "public"."stock_movement_type" AS ENUM('PURCHASE', 'SALE', 'RETURN', 'DAMAGE', 'EXPIRY', 'ADJUSTMENT');--> statement-breakpoint
-CREATE TABLE "products" (
+DO $$
+BEGIN
+	CREATE TYPE "public"."stock_movement_type" AS ENUM (
+		'PURCHASE', 'SALE', 'RETURN', 'DAMAGE', 'EXPIRY', 'ADJUSTMENT'
+	);
+EXCEPTION
+	WHEN duplicate_object THEN NULL;
+END $$;
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "products" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"name" varchar(200) NOT NULL,
 	"sku" varchar(100) NOT NULL,
@@ -20,15 +28,17 @@ CREATE TABLE "products" (
 	"updated_at" timestamp,
 	"updated_by" uuid,
 	"deleted_at" timestamp,
-	"deleted_by" uuid,
-	CONSTRAINT "products_sku_unique" UNIQUE("sku"),
-	CONSTRAINT "products_barcode_unique" UNIQUE("barcode")
+	"deleted_by" uuid
 );
 --> statement-breakpoint
-CREATE TABLE "stock_movements" (
+CREATE UNIQUE INDEX IF NOT EXISTS "products_sku_unique" ON "products" ("sku");
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "products_barcode_unique" ON "products" ("barcode");
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "stock_movements" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"product_id" uuid NOT NULL,
-	"type" "stock_movement_type" NOT NULL,
+	"type" "public"."stock_movement_type" NOT NULL,
 	"quantity" numeric(12, 3) NOT NULL,
 	"reference" varchar(100),
 	"notes" varchar(500),
@@ -36,13 +46,42 @@ CREATE TABLE "stock_movements" (
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "categories" ALTER COLUMN "name" SET DATA TYPE varchar(100);--> statement-breakpoint
-ALTER TABLE "categories" ALTER COLUMN "updated_at" DROP DEFAULT;--> statement-breakpoint
-ALTER TABLE "categories" ALTER COLUMN "updated_at" DROP NOT NULL;--> statement-breakpoint
-ALTER TABLE "categories" ADD COLUMN "is_deleted" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "categories" ADD COLUMN "created_by" uuid;--> statement-breakpoint
-ALTER TABLE "categories" ADD COLUMN "updated_by" uuid;--> statement-breakpoint
-ALTER TABLE "categories" ADD COLUMN "deleted_at" timestamp;--> statement-breakpoint
-ALTER TABLE "categories" ADD COLUMN "deleted_by" uuid;--> statement-breakpoint
-ALTER TABLE "products" ADD CONSTRAINT "products_category_id_categories_id_fk" FOREIGN KEY ("category_id") REFERENCES "public"."categories"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "stock_movements" ADD CONSTRAINT "stock_movements_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "categories" ALTER COLUMN "name" TYPE varchar(100);
+--> statement-breakpoint
+ALTER TABLE "categories" ALTER COLUMN "updated_at" DROP DEFAULT;
+--> statement-breakpoint
+ALTER TABLE "categories" ALTER COLUMN "updated_at" DROP NOT NULL;
+--> statement-breakpoint
+ALTER TABLE "categories" ADD COLUMN IF NOT EXISTS "is_deleted" boolean DEFAULT false NOT NULL;
+--> statement-breakpoint
+ALTER TABLE "categories" ADD COLUMN IF NOT EXISTS "created_by" uuid;
+--> statement-breakpoint
+ALTER TABLE "categories" ADD COLUMN IF NOT EXISTS "updated_by" uuid;
+--> statement-breakpoint
+ALTER TABLE "categories" ADD COLUMN IF NOT EXISTS "deleted_at" timestamp;
+--> statement-breakpoint
+ALTER TABLE "categories" ADD COLUMN IF NOT EXISTS "deleted_by" uuid;
+--> statement-breakpoint
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_constraint WHERE conname = 'products_category_id_categories_id_fk'
+	) THEN
+		ALTER TABLE "products"
+			ADD CONSTRAINT "products_category_id_categories_id_fk"
+			FOREIGN KEY ("category_id") REFERENCES "public"."categories"("id")
+			ON DELETE NO ACTION ON UPDATE NO ACTION;
+	END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+	IF NOT EXISTS (
+		SELECT 1 FROM pg_constraint WHERE conname = 'stock_movements_product_id_products_id_fk'
+	) THEN
+		ALTER TABLE "stock_movements"
+			ADD CONSTRAINT "stock_movements_product_id_products_id_fk"
+			FOREIGN KEY ("product_id") REFERENCES "public"."products"("id")
+			ON DELETE NO ACTION ON UPDATE NO ACTION;
+	END IF;
+END $$;
