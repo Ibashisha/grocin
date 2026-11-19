@@ -125,49 +125,49 @@ export async function adjustStock(
     };
   }
 
-  const [product] = await db
-    .select({
-      id: products.id,
-      currentStock: products.currentStock,
-    })
-    .from(products)
-    .where(and(eq(products.id, productId), eq(products.isDeleted, false)))
-    .limit(1);
+  const result = await db.transaction(async (tx) => {
+    const [product] = await tx
+      .select({
+        id: products.id,
+        currentStock: products.currentStock,
+      })
+      .from(products)
+      .where(and(eq(products.id, productId), eq(products.isDeleted, false)))
+      .for("update")
+      .limit(1);
 
-  if (!product) {
-    return {
-      success: false as const,
-      error: "Product not found",
-    };
-  }
-
-  const currentStock = Number(product.currentStock);
-
-  let newStock: number;
-
-  if (data.type === "ADD") {
-    newStock = currentStock + quantity;
-  } else if (data.type === "REMOVE") {
-    if (quantity > currentStock) {
+    if (!product) {
       return {
         success: false as const,
-        error: `Insufficient stock. Current stock: ${currentStock}`,
+        error: "Product not found",
       };
     }
 
-    newStock = currentStock - quantity;
-  } else {
-    newStock = quantity;
-  }
+    const currentStock = Number(product.currentStock);
+    let newStock: number;
 
-  const movementQuantity =
-    data.type === "REMOVE"
-      ? `-${quantity}`
-      : data.type === "SET"
-        ? String(newStock - currentStock)
-        : String(quantity);
+    if (data.type === "ADD") {
+      newStock = currentStock + quantity;
+    } else if (data.type === "REMOVE") {
+      if (quantity > currentStock) {
+        return {
+          success: false as const,
+          error: `Insufficient stock. Current stock: ${currentStock}`,
+        };
+      }
 
-  await db.transaction(async (tx) => {
+      newStock = currentStock - quantity;
+    } else {
+      newStock = quantity;
+    }
+
+    const movementQuantity =
+      data.type === "REMOVE"
+        ? -quantity
+        : data.type === "SET"
+          ? newStock - currentStock
+          : quantity;
+
     await tx
       .update(products)
       .set({
@@ -179,16 +179,20 @@ export async function adjustStock(
     await tx.insert(stockMovements).values({
       productId,
       type: "ADJUSTMENT",
-      quantity: movementQuantity,
+      quantity: String(movementQuantity),
       stockAfter: String(newStock),
       notes: data.reason.trim() || null,
     });
+
+    return { success: true as const };
   });
+
+  if (!result.success) {
+    return result;
+  }
 
   revalidatePath("/products");
   revalidatePath(`/products/${productId}/stock`);
 
-  return {
-    success: true as const,
-  };
+  return { success: true as const };
 }
